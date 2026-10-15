@@ -1,3 +1,8 @@
 env_lamp/*
 *.pyc
 __pycache__/
+.agents/
+.codex/
+AI_SPACE/
+AGENTS.md
+
