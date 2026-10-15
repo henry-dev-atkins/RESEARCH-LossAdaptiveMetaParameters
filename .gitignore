@@ -1,0 +1,3 @@
+env_lamp/*
+*.pyc
+__pycache__/
