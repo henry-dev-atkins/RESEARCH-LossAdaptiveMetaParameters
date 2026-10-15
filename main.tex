@@ -1,0 +1,315 @@
+\documentclass[12pt]{article}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{geometry}
+\usepackage{algorithm, algpseudocode}
+\usepackage{hyperref}
+
+\title{Introducing Loss Adaptive Meta-Parameters, LAMPs.}
+\author{Research Proposal}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+High learning rates accelerate learning but risk instability, while large batch sizes reduce gradient noise but increase computational cost.
+Standard, static or dynamic methods do not consider the interplay of these meta-parameters.  
+We propose an online adaptive controller that dynamically allocates the batch size and learning rate in response to loss convergence. 
+We use only observable variables, specifically successive loss decreases.
+\begin{enumerate}
+\item We show the stochastic penalty in SGD scales with $\eta^2/B$, and how it can be estimated by comparing observed and predicted loss reductions.
+\item We then pursue the standard convergence theorems under smoothness and convexity, showing that our controller achieves <??? Fill In With results>.
+\end{enumerate}
+
+\section{Preliminaries}
+
+Optimise by minimising the sum of sample losses ($\ell_i(\theta)$), over parameters $\theta$
+\[
+\mathcal{L}(\theta) \;=\; \frac{1}{N}\sum_{i=1}^N \ell_i(\theta), 
+\]
+At iteration $t$, draw a mini-batch $\mathcal{B}_t$ of size $B_t$ and compute the stochastic gradient
+\[
+\widehat g_t \;=\; \frac{1}{B_t}\sum_{i\in \mathcal{B}_t}\nabla \ell_i(\theta_t).
+\]
+We assume there is an expected gradient ($g_t$) and that gradients follow a joint Gaussian distribution under a covariance matrix $\Sigma_t$. 
+\[
+\mathbb{E}[\widehat g_t \mid \theta_t] = g_t := \nabla L(\theta_t), 
+\quad
+\mathrm{Cov}(\widehat g_t \mid \theta_t) = \frac{\Sigma_t}{B_t},
+\]
+Therefore,  $\text{variance} \propto \frac{1}{\text{batch size}}$, and the update is
+\[
+\theta_{t+1} \;=\; \theta_t - \eta_t \widehat g_t.
+\]
+
+\paragraph{Assumptions.} We follow standard optyimisation assumptions
+\begin{itemize}
+\item \textbf{Smoothness:} $\mathcal{L}$ is $\mathcal{L}$-smooth, meaning 
+\[
+\mathcal{L}(\theta') \le \mathcal{L}(\theta) + \langle \nabla \mathcal{L}(\theta), \theta'-\theta\rangle + \frac{\mathcal{L}}{2}\|\theta'-\theta\|^2.
+\]
+\item \textbf{Bounded variance:} $\mathrm{tr}(\Sigma_t)\le \sigma^2 < \infty$ for all $t$.
+\item \textbf{PL or strong convexity (for deep applications):} For $\mu>0$, 
+\[
+\frac{1}{2}\|\nabla \mathcal{L}(\theta)\|^2 \ge \mu\,(\mathcal{L}(\theta)-\mathcal{L}_\star).
+\]
+\end{itemize}
+
+\section{One Step Descent}
+Using smoothness and the standard assumption of $\eta_t \le \tfrac{1}{\mathcal{L}}$, the SGD one step descent is
+\[
+\mathbb{E}[\mathcal{L}(\theta_{t+1}) \mid \theta_t] 
+\le \mathcal{L}(\theta_t) - \eta_t\Big(1 - \tfrac{L\eta_t}{2}\Big)\|g_t\|^2 
++ \frac{L\eta_t^2}{2B_t}\,\mathrm{tr}(\Sigma_t).
+\]
+\begin{proof}
+Standard Proof
+\end{proof}
+
+\noindent The right-hand side decomposes with the Hessian ($H_t := \nabla^2 \mathcal{L}( \theta_t )$) into:
+\begin{itemize}
+\item \emph{Deterministic descent:} $-\eta_t\|g_t\|^2 + \tfrac{\eta_t^2}{2} g_t^\top H_t g_t$.
+\item \emph{Stochastic penalty:} $\tfrac{L\eta_t^2}{2B_t}\mathrm{tr}(\Sigma_t)$.
+\end{itemize}
+This decomposes the expected change into a \emph{deterministic decrease} that depends on $\eta_t\|g_t\|^2$ and curvature (via the $(1-\tfrac{L\eta_t}{2})$ factor), and a \emph{stochastic penalty} of magnitude $\tfrac{L\eta_t^2}{2B_t}\mathrm{tr}(\Sigma_t)$. The latter is the price paid for noise and it scales as $\eta_t^2/B_t$.
+
+\section{Variance Budgeting}
+Our contributions begin by enforcing a maximum on the stochastic penalty as a fraction ($\gamma$) of the deterministic descent. This is done to quantify the ratio of deterministic loss gain and noisy loss evolution.
+\begin{equation}
+\label{eq:budget}
+    \frac{L\eta_t^2}{2B_t}\,\mathrm{tr}(\Sigma_t) \le \gamma_t \eta_t \|g_t\|^2,
+    \quad 
+    \gamma_t < 1 - \frac{L\eta_t}{2}.
+\end{equation}
+Which yields 
+\[
+    \mathbb{E}[L(\theta_{t+1}) \mid \theta_t]
+    \le L(\theta_t) - c_t \eta_t \|g_t\|^2,
+    \quad
+    c_t = 1 - \frac{L\eta_t}{2} - \gamma_t > 0.
+\]
+when combined with the One Step Descent expression.
+
+\section{Loss-Driven Controller}
+The main contribution follows. The variance budget requires $\mathrm{tr}(\Sigma_t)$, which is not directly observed. Instead, we estimate the stochastic penalty using the observed loss reduction ($\nabla \mathcal{L}$). We predict the deterministic decrease as 
+\[
+\Delta L_{\text{det}} \approx \eta_t\|g_t\|^2 - \tfrac{\eta_t^2}{2} g_t^\top H_t g_t,
+\]
+and compare with the observed decrease $\Delta L_{\text{obs}} = L(\theta_t)-L(\theta_{t+1})$. The gap estimates the stochastic penalty:
+\[
+\widehat{\Delta L_{\text{stoch}}} = \Delta L_{\text{det}} - \Delta L_{\text{obs}}.
+\]
+Therefore, a rule is introduced:
+\begin{itemize}
+    \item Large $\widehat{\Delta L_{\text{stoch}}}$: shrink $\gamma$ by reducing $\eta$, growing $B_t$. The stochastic term is dominating, so the loss evolution is more random and optimisation is inefficient.
+    \item Small $\widehat{\Delta L_{\text{stoch}}}$: increase $\gamma$ by growing $\eta$, reducing $B_t$, as the stochastic term is too small, meaning that there are computational savings to be made.
+\end{itemize}
+Of course, this lagged treatment requires $\widehat{\Delta L_{\text{stoch}}}$ to be stationary.
+
+\subsubsection{Theoretical Justification of Lagged Measurement}
+
+Suppose $\widehat{\Delta L_{\text{stoch}}}$ satisfies
+\[
+\left| \widehat{\Delta L_{\text{stoch}}} - \frac{L\eta_t^2}{2B_t}\mathrm{tr}(\Sigma_t)\right|
+\;\le\; \varepsilon_t,
+\quad
+\varepsilon_t \le \bar\varepsilon \,\eta_t\|g_t\|^2.
+\]
+If the controller ensures $\widehat{\Delta L_{\text{stoch}}}\le \tilde\gamma \eta_t\|g_t\|^2$, then the true variance budget holds with $\gamma_t=\tilde\gamma+\bar\varepsilon$. Provided $\gamma_t < 1-L\eta_t/2$, the convergence theorems above apply.
+
+\noindent \textbf{Design remarks.} The bound $\varepsilon_t\!\le\!\bar\varepsilon\,\eta_t\|g_t\|^2$ is natural if (i) the local quadratic error is $O(\eta_t^2\|g_t\|^2)$ and (ii) $\Delta L_{\mathrm{obs},t}$ is smoothed (e.g.\ moving average), yielding small $\bar\varepsilon$. 
+
+\noindent The loss-gap estimator closes the loop using only observable quantities. With mild smoothing and a local quadratic proxy, the estimation error integrates cleanly into the analysis.
+
+\begin{proof}
+We have
+\[
+\frac{L\eta_t^2}{2B_t}\mathrm{tr}(\Sigma_t)
+\;\le\; \widehat{\Delta L_{\text{stoch}}} + \varepsilon_t
+\;\le\; \tilde\gamma \eta_t\|g_t\|^2 + \bar\varepsilon \eta_t\|g_t\|^2
+= (\tilde\gamma+\bar\varepsilon)\eta_t\|g_t\|^2.
+\]
+Thus the true budget holds with $\gamma_t=\tilde\gamma+\bar\varepsilon$.
+\end{proof}
+
+
+\section{Convergence Guarantees}
+\subsection{Smooth Nonconvex: Convergence to Stationarity}
+Assume $L$-smoothness, a lower bound $L_\star$, steps $\eta_t\in(0,1/L]$, and \eqref{eq:budget} with $c_t\ge c_{\min}>0$. Then ...
+\subsection{PL / Strongly-Convex: Linear Convergence with Increasing $B_t$}
+Suppose $L$-smooth and PL with constant $\mu>0$. Fix $\eta\in(0,1/L]$ and enforce \eqref{eq:budget} with $\gamma_t\le\bar\gamma<1-\tfrac{L\eta}{2}$ for all $t$ (e.g.\ by increasing $B_t$). Then ...
+
+
+\section{Controller}
+Let $\widehat{\Delta L_{\mathrm{stoch},t}}^+=\max\{0,\widehat{\Delta L_{\mathrm{stoch},t}}\}$ and pick small gains $\alpha,\beta>0$:
+\[
+\begin{aligned}
+B_{t+1}&\leftarrow \mathrm{clip}\!\left(B_t \cdot \Big[1+\alpha\,\frac{\widehat{\Delta L_{\mathrm{stoch},t}}^+}{\eta_t\|\widehat g_t\|^2}\Big],\,B_{\min},\,B_{\max}\right),\\
+\eta_{t+1}&\leftarrow \mathrm{clip}\!\left(\eta_t \cdot \Big[1+\beta\,\frac{\Delta L_{\mathrm{det},t}-\widehat{\Delta L_{\mathrm{stoch},t}}}{\eta_t\|\widehat g_t\|^2}\Big],\,0,\,\tfrac{1}{L}\right).
+\end{aligned}
+\]
+This enforces a target fraction $\tilde\gamma$ and inherits the convergence guarantees.
+
+\section{Worked Example: SGD vs LAMP Controller}
+
+We illustrate the controller on a simple one-dimensional quadratic with additive gradient noise. Let
+\[
+\mathcal{L}(\theta)=\frac{1}{2}(\theta-\theta^\star)^2,\qquad \theta^\star=0,\quad L\text{-smooth with }L=1.
+\]
+Thus $g(\theta)=\nabla \mathcal{L}(\theta)=\theta$ and the stochastic gradient is
+\[
+\widehat g = g + \xi,\qquad \mathbb{E}[\xi]=0,\quad \mathrm{Var}(\xi)=\frac{\sigma^2}{B}.
+\]
+We fix $\sigma^2=4$ and learning rate $\eta=0.4\le 1/L$. We run $5$ steps from $\theta_0=3$.
+To make a fair comparison, we use the \emph{same normalized noise draws} $u_t$ (mean $0$, var $1$) for both methods and scale them by $\frac{2}{\sqrt{B_t}}$ (since $\sigma=2$). Concretely, take $(u_0,u_1,u_2,u_3,u_4)=(0.5,-0.25,0.4,-0.6,0.15)$, so the noise sample at step $t$ is $\xi_t=\frac{2u_t}{\sqrt{B_t}}$.
+
+\subsection{Vanilla SGD (fixed $B=1$)}
+Here $\xi_t=2u_t$. The update is $\theta_{t+1}=\theta_t-\eta(\theta_t+\xi_t)$.
+
+\begin{center}
+\small
+\begin{tabular}{@{}rrrrrrr@{}}
+$t$ & $\theta_t$ & $g_t=\theta_t$ & $B_t$ & $\xi_t$ & $\widehat g_t$ & $\theta_{t+1}$ \\
+0 & 3.0000 & 3.0000 & 1 & \phantom{-}1.0000 & \phantom{-}4.0000 & 1.4000 \\
+1 & 1.4000 & 1.4000 & 1 & -0.5000 & \phantom{-}0.9000 & 1.0400 \\
+2 & 1.0400 & 1.0400 & 1 & \phantom{-}0.8000 & \phantom{-}1.8400 & 0.3040 \\
+3 & 0.3040 & 0.3040 & 1 & -1.2000 & -0.8960 & 0.6624 \\
+4 & 0.6624 & 0.6624 & 1 & \phantom{-}0.3000 & \phantom{-}0.9624 & 0.27744 \\
+\end{tabular}
+\end{center}
+
+The loss values $\mathcal{L}(\theta_t)=\tfrac{1}{2}\theta_t^2$ start at $4.5$ and end at
+\[
+\mathcal{L}(\theta_5)=\tfrac{1}{2} (0.27744)^2 \approx 0.03849.
+\]
+
+\subsection{Adaptive Controller (variance budget: $\gamma=0.2$)}
+
+We enforce the budget \eqref{eq:budget} with \emph{constant} $\eta=0.4$ and target fraction $\gamma=0.2$.
+In this quadratic example, $L=1$, $\|g_t\|^2=\theta_t^2$, and $\mathrm{tr}(\Sigma)=\sigma^2=4$, so
+\[
+\frac{L\eta^2}{2B_t}\,\mathrm{tr}(\Sigma) \le \gamma \eta \|g_t\|^2
+\quad\Longleftrightarrow\quad
+B_t \;\ge\; \frac{L\eta\,\mathrm{tr}(\Sigma)}{2\gamma\,\|g_t\|^2}
+= \frac{0.4\cdot 4}{2\cdot 0.2\,\theta_t^2}
+= \frac{4}{\theta_t^2}.
+\]
+We choose $B_t=\max\{1,\lceil 4/\theta_t^2\rceil\}$. The noise is $\xi_t=\frac{2u_t}{\sqrt{B_t}}$ and the update is $\theta_{t+1}=\theta_t-\eta(\theta_t+\xi_t)$.
+
+\begin{center}
+\small
+\begin{tabular}{@{}rrrrrrrr@{}}
+\toprule
+$t$ & $\theta_t$ & $g_t$ & $B_t=\lceil 4/\theta_t^2\rceil$ & $\xi_t=\frac{2u_t}{\sqrt{B_t}}$ & $\widehat g_t$ & $\theta_{t+1}$ & $L(\theta_t)$ \\
+\midrule
+0 & 3.0000 & 3.0000 & \phantom{0}1 & \phantom{-}1.00000 & \phantom{-}4.00000 & 1.40000 & 4.50000 \\
+1 & 1.4000 & 1.4000 & \phantom{0}3 & -0.28868 & \phantom{-}1.11132 & 0.95547 & 0.98000 \\
+2 & 0.95547 & 0.95547 & \phantom{0}5 & \phantom{-}0.35777 & \phantom{-}1.31324 & 0.43018 & 0.45696 \\
+3 & 0.43018 & 0.43018 & 22 & -0.25584 & \phantom{-}0.17433 & 0.36044 & 0.09252 \\
+4 & 0.36044 & 0.36044 & 31 & \phantom{-}0.05388 & \phantom{-}0.41432 & 0.19471 & 0.06496 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Here $B_t$ automatically increases as $\theta_t$ shrinks, reducing gradient noise while keeping $\eta$ fixed, as the model reaches the optimal value. After five updates,
+\[
+L(\theta_5)=\tfrac{1}{2}\,(0.1947117)^2 \approx 0.01896,
+\]
+which is roughly a factor $\approx 2$ smaller than vanilla SGD's $0.03849$ with the same $\eta$ and the same normalized noise draws.
+
+\paragraph{What happened?} Early on, both methods behave similarly ($B_0=1$). As $\theta_t$ decreases, the variance budget demands larger $B_t\!\propto\! 1/\theta_t^2$; the controller increases $B_t$ and thus suppresses noise ($\xi_t$ shrinks as $1/\sqrt{B_t}$). This allows the constant stepsize $\eta=0.4$ to continue making reliable progress without overpaying the stochastic penalty. The behavior mirrors the theory: under PL (which holds here), a fixed $\eta$ with increasing $B_t$ achieves a \emph{uniform} sufficient decrease, enabling the linear contraction proved above.
+
+\subsection{The Goldmine: Joint LR and BS Adaptation}
+In practice one can also let $\eta_t$ increase or decrease while enforcing the variance budget. For instance, if the observed loss decrease consistently matches the deterministic prediction (small $\widehat{\Delta L_{\mathrm{stoch}}}$), the controller can \emph{increase} $\eta_t$ moderately (keeping $\eta_t\le 1/L$) to accelerate, while adjusting $B_t$ so that \eqref{eq:budget} continues to hold.
+
+
+
+
+
+\section{Algorithmic Summary}
+\begin{algorithm}[H]
+\caption{Standard Stochastic Gradient Descent (SGD)}
+\label{alg:SGD}
+\begin{algorithmic}[1]
+  \Require
+    \\
+    \(\theta^0 \in \mathbb{R}^d\) \Comment{initial parameters} \\
+    \(\eta_0 > 0\) \Comment{initial learning rate} \\
+    \(T\) \Comment{total iterations} \\
+    \(B_t\) \Comment{mini-batch size at iteration $t$} \\
+
+  \For{\(t = 0,1,\dots,T-1\)}  
+    \State Sample a mini-batch \(\mathcal{B}_t \subset \{1,\dots,N\}\) with \(|\mathcal{B}_t| = B_t\)  
+    \State Compute stochastic gradient $\quad \tilde g^t \;=\; \frac{1}{B_t}\sum_{i \in \mathcal{B}_t} \nabla_\theta \ell_i(\theta^t)$
+    \State Update parameters $\quad \theta^{t+1} \;\gets\; \theta^t - \eta_t \tilde g^t$
+  \EndFor  
+
+\end{algorithmic}
+\end{algorithm}
+
+
+\begin{algorithm}[H]
+\caption{LAM-Batches Training}
+\label{alg:SGD-adaptive-B}
+\begin{algorithmic}[1]
+  \Require
+    \\
+    $\theta^0 \in \mathbb{R}^d$ \Comment{initial parameters} \\
+    $\eta_0 > 0$ \Comment{initial learning rate} \\
+    $T$ \Comment{total iterations} \\
+    $B_0$ \Comment{starting batch size} \\
+    $B_{\min},\,B_{\max}$ \Comment{batch size bounds} \\
+    $\alpha>0$ \Comment{batch-size gain (small, e.g.\ $10^{-2}$)} \\
+    $\rho \in [0,1)$ \Comment{EMA smoothing for loss}
+  \State \textbf{Initialize:} $\bar L_0 \gets \mathcal{L}(\theta^0)$
+
+  \For{$t = 0,1,\dots,T-1$}
+    \State Sample a mini-batch $\mathcal{B}_t \subset \{1,\dots,N\}$ with $|\mathcal{B}_t| = B_t$
+    \State Compute stochastic gradient $\quad \tilde g^t \;=\; \frac{1}{B_t}\sum_{i \in \mathcal{B}_t} \nabla_\theta \ell_i(\theta^t)$
+    \State Update parameters $\quad \theta^{t+1} \;\gets\; \theta^t - \eta_t \tilde g^t$
+    \State Measure loss and smooth it
+      \[
+      L_t \gets \mathcal{L}(\theta^t), \quad L_{t+1} \gets \mathcal{L}(\theta^{t+1}), \quad
+      \bar L_{t+1} \gets \rho\,\bar L_t + (1-\rho)\,L_{t+1}
+      \]
+    \State Observed decrease \& deterministic proxy
+      \[
+      \Delta L_{\mathrm{obs}} \gets L_t - \bar L_{t+1}, \qquad
+      \Delta L_{\mathrm{det}} \gets \eta_t \,\|\widehat g^t\|^2 \;-\; \frac{\eta_t^2}{2}\,L\,\|\widehat g^t\|^2
+      \]
+      \Comment{uses $L$-smooth bound; replace with $g^\top H g$ if available}
+    \State Loss-gap estimate of stochastic penalty
+      \[
+      \widehat{\Delta L_{\mathrm{stoch}}} \gets \max\!\big\{0,\; \Delta L_{\mathrm{det}} - \Delta L_{\mathrm{obs}}\big\}
+      \]
+    \State Normalize by deterministic scale $s_t \gets \eta_t \max\{\|\widehat g^t\|^2,\varepsilon\}$ \Comment{$\varepsilon>0$ avoids divide-by-zero}
+    \State \textbf{Adapt batch size}
+      \[
+      B_{t+1} \;\gets\; \mathrm{clip}\!\left(
+        B_t \cdot \Big[\,1 + \alpha \cdot \frac{\widehat{\Delta L_{\mathrm{stoch}}}}{s_t}\,\Big],
+        \; B_{\min},\; B_{\max}
+      \right)
+      \]
+      \Comment{increase $B$ when stochastic penalty is large; otherwise keep near $B_t$}
+    \State \textbf{(Optional) Coupled LR guard to preserve noise level} \\
+      \hspace*{1.25em} \textit{If you wish to keep $\eta/B$ roughly constant when $B$ changes:}
+      \[
+      \eta_{t+1} \gets \min\!\left\{\eta_{\max},\; \eta_t \cdot \frac{B_{t+1}}{B_t} \right\}
+      \]
+      \textit{Else keep a separate LR schedule: } $\eta_{t+1} \gets \text{Schedule}(\eta_t)$
+  \EndFor
+\end{algorithmic}
+\end{algorithm}
+
+
+
+\section{Experiments}
+\subsection{}
+
+
+
+
+
+
+\end{document}
