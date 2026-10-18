@@ -20,7 +20,7 @@ from torch.utils.data import TensorDataset
 
 
 @dataclass(frozen=True)
-class LOCCOConfig:
+class LAMPConfig:
     """Configuration for the signed log-space controller."""
 
     gamma_tgt: float = 0.2
@@ -66,10 +66,10 @@ class ControllerDecision:
     chatter: int
 
 
-class LOCCOController:
-    """Apply the signed, smoothed, log-space LOCCO update."""
+class LAMPController:
+    """Apply the signed, smoothed, log-space LAMP update."""
 
-    def __init__(self, config: LOCCOConfig, eta0: float, batch0: int) -> None:
+    def __init__(self, config: LAMPConfig, eta0: float, batch0: int) -> None:
         self.config = config
         self.vB = 0.0
         self.previous_error_sign = 0
@@ -85,7 +85,7 @@ class LOCCOController:
     @staticmethod
     def _require_finite(values: Iterable[float]) -> None:
         if not all(math.isfinite(float(value)) for value in values):
-            raise ValueError("LOCCO received a non-finite observation")
+            raise ValueError("LAMP received a non-finite observation")
 
     def update(self, observation: ControllerObservation) -> ControllerDecision:
         """Return the next controls from one measured optimiser update."""
@@ -100,9 +100,9 @@ class LOCCOController:
             )
         )
         if observation.eta <= 0.0 or observation.batch <= 0:
-            raise ValueError("LOCCO requires positive learning rate and batch size")
+            raise ValueError("LAMP requires positive learning rate and batch size")
         if observation.grad_norm2 < 0.0:
-            raise ValueError("LOCCO requires a non-negative squared gradient norm")
+            raise ValueError("LAMP requires a non-negative squared gradient norm")
 
         delta_obs = observation.loss_before - observation.loss_after
         q = self.config.Ls * observation.grad_norm2
@@ -304,9 +304,9 @@ def train_neural_run(
     else:
         optimiser = torch.optim.SGD(model.parameters(), lr=eta0)
 
-    controller: LOCCOController | None = None
-    if method.startswith("locco"):
-        controller_config = LOCCOConfig(
+    controller: LAMPController | None = None
+    if method.startswith("lamp"):
+        controller_config = LAMPConfig(
             gamma_tgt=float(config["gamma_tgt"]),
             rho=float(config["rho"]),
             mu_B=float(config["mu_B"]),
@@ -318,10 +318,10 @@ def train_neural_run(
             B_max=min(int(config["B_max"]), len(train)),
             eta_min=float(config["eta_min"]),
             eta_max=float(config["eta_max"]),
-            enable_batch=method in {"locco_batch", "locco_joint"},
-            enable_eta=method in {"locco_lr", "locco_joint"},
+            enable_batch=method in {"lamp_batch", "lamp_joint"},
+            enable_eta=method in {"lamp_lr", "lamp_joint"},
         )
-        controller = LOCCOController(controller_config, eta0, batch0)
+        controller = LAMPController(controller_config, eta0, batch0)
 
     eta, batch = eta0, batch0
     step_rows: list[dict[str, Any]] = []
@@ -430,9 +430,9 @@ def run_quadratic(method: str, seed: int, config: dict[str, Any], output_root: P
     eta = float(config["quadratic_initial_learning_rate"])
     batch = int(config["quadratic_initial_batch"])
     controller = None
-    if method == "locco_joint":
-        controller = LOCCOController(
-            LOCCOConfig(
+    if method == "lamp_joint":
+        controller = LAMPController(
+            LAMPConfig(
                 gamma_tgt=float(config["gamma_tgt"]),
                 rho=float(config["rho"]),
                 mu_B=float(config["mu_B"]),
@@ -498,17 +498,17 @@ def run_suite(args: argparse.Namespace) -> None:
     output_root = Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
     if args.suite == "smoke":
-        run_quadratic("locco_joint", args.seed, config, output_root, steps=8)
-        train_neural_run("clf_moons", "locco_joint", args.seed, args.device, config, output_root, epochs_override=2)
+        run_quadratic("lamp_joint", args.seed, config, output_root, steps=8)
+        train_neural_run("clf_moons", "lamp_joint", args.seed, args.device, config, output_root, epochs_override=2)
         return
 
     seeds = [int(value) for value in config["seeds"]]
     for seed in seeds:
         for method in config["methods"]:
-            if method == "adam" or method.startswith("locco") or method == "fixed_sgd":
+            if method == "adam" or method.startswith("lamp") or method == "fixed_sgd":
                 for task in ("clf_moons", "reg_sine"):
                     train_neural_run(task, method, seed, args.device, config, output_root)
-        for method in ("fixed_sgd", "locco_joint"):
+        for method in ("fixed_sgd", "lamp_joint"):
             run_quadratic(method, seed, config, output_root, steps=int(config["quadratic_steps"]))
 
 

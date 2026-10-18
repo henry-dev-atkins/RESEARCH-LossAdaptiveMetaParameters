@@ -19,9 +19,17 @@ import numpy as np
 METHOD_LABELS = {
     "fixed_sgd": "Fixed SGD",
     "adam": "Adam",
-    "locco_batch": "LOCCO batch",
-    "locco_lr": "LOCCO LR",
-    "locco_joint": "LOCCO joint",
+    "lamp_batch": "LAMP batch",
+    "lamp_lr": "LAMP LR",
+    "lamp_joint": "LAMP joint",
+}
+METHOD_ORDER = ["fixed_sgd", "adam", "lamp_batch", "lamp_lr", "lamp_joint"]
+METHOD_COLORS = {
+    "fixed_sgd": "#2c3e50",
+    "adam": "#e67e22",
+    "lamp_batch": "#16a085",
+    "lamp_lr": "#2980b9",
+    "lamp_joint": "#c0392b",
 }
 
 
@@ -178,29 +186,87 @@ def plot_quadratic(summaries: list[dict[str, Any]], output_root: Path) -> None:
 
 
 def plot_learning_curves(summaries: list[dict[str, Any]], output_root: Path) -> None:
-    figure, axes = plt.subplots(1, 2, figsize=(8, 3.2), sharey=False)
+    figure, axes = plt.subplots(1, 2, figsize=(8, 3.6), sharey=False)
     for axis, task in zip(axes, ("clf_moons", "reg_sine")):
         grouped: dict[str, list[list[dict[str, Any]]]] = defaultdict(list)
         for summary in summaries:
             if summary["task"] == task:
                 grouped[summary["method"]].append(read_rows(Path(summary["run_root"]) / "epochs.csv"))
-        for method, runs in grouped.items():
+
+        ordered_methods = [
+            method
+            for method in METHOD_ORDER
+            if method in grouped
+        ] + [method for method in grouped if method not in METHOD_ORDER]
+
+        for method in ordered_methods:
+            runs = grouped[method]
             x = np.asarray([row["examples_seen"] for row in runs[0]], dtype=float)
             y = np.asarray([[row["val_loss"] for row in run] for run in runs], dtype=float)
-            axis.plot(x, y.mean(axis=0), label=METHOD_LABELS.get(method, method))
+            mean = y.mean(axis=0)
+            std = y.std(axis=0)
+            color = METHOD_COLORS.get(method, "#2c3e50")
+            axis.plot(x, mean, color=color, linewidth=2, label=METHOD_LABELS.get(method, method))
             if len(runs) > 1:
-                axis.fill_between(x, y.mean(axis=0) - y.std(axis=0), y.mean(axis=0) + y.std(axis=0), alpha=0.15)
+                axis.fill_between(x, mean - std, mean + std, color=color, alpha=0.14)
         axis.set_xlabel("Examples seen")
         axis.set_ylabel("Validation loss")
         axis.set_title("Moons" if task == "clf_moons" else "Sine")
+        axis.grid(alpha=0.15, linewidth=0.8)
     axes[0].legend(frameon=False, fontsize=8)
     save_figure(figure, output_root, "fig-learning-curves")
+
+
+def plot_method_comparison(summaries: list[dict[str, Any]], output_root: Path) -> None:
+    figure, axes = plt.subplots(1, 2, figsize=(8.5, 3.2), sharey=False)
+    for axis, task in zip(axes, ("clf_moons", "reg_sine")):
+        grouped: dict[str, list[float]] = defaultdict(list)
+        for summary in summaries:
+            if summary["task"] == task:
+                grouped[summary["method"]].append(float(summary["final_test_metric"]))
+        if not grouped:
+            continue
+        label_to_key = {label: key for key, label in METHOD_LABELS.items()}
+        ordered_methods = [
+            method
+            for method in METHOD_ORDER
+            if method in grouped
+        ] + [method for method in grouped if method not in METHOD_ORDER]
+        labels = [METHOD_LABELS.get(method, method) for method in ordered_methods]
+        values = [float(np.mean(grouped[method])) for method in ordered_methods]
+        sems = [
+            float(np.std(grouped[method], ddof=1) / np.sqrt(len(grouped[method]))) if len(grouped[method]) > 1 else 0.0
+            for method in ordered_methods
+        ]
+        baseline = next((method for method in ordered_methods if method == "fixed_sgd"), None)
+        colors = [METHOD_COLORS.get(method, "#2c3e50") for method in ordered_methods]
+        axis.bar(labels, values, yerr=sems, color=colors, edgecolor="0.25", linewidth=0.8, capsize=4, error_kw={"elinewidth": 1.0})
+        if baseline is not None:
+            baseline_index = ordered_methods.index(baseline)
+            axis.axhline(float(np.mean(grouped[baseline])), linestyle="--", color="0.5", linewidth=1.0, alpha=0.8)
+            axis.annotate(
+                "Fixed SGD baseline",
+                xy=(baseline_index, float(np.mean(grouped[baseline]))),
+                xytext=(0, 8),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=7,
+                color="0.35",
+            )
+        axis.set_xlabel("Method")
+        axis.set_ylabel("Final test metric")
+        axis.set_title("Moons" if task == "clf_moons" else "Sine")
+        axis.grid(axis="y", alpha=0.15)
+        axis.tick_params(axis="x", rotation=20)
+
+    save_figure(figure, output_root, "fig-method-comparison")
 
 
 def plot_controller(summaries: list[dict[str, Any]], output_root: Path) -> None:
     figure, axes = plt.subplots(3, 1, figsize=(7, 6), sharex=True)
     for summary in summaries:
-        if summary["method"] != "locco_joint" or summary["task"] == "quadratic":
+        if summary["method"] != "lamp_joint" or summary["task"] == "quadratic":
             continue
         rows = read_rows(Path(summary["run_root"]) / "steps.csv")
         label = f"{summary['task']} seed {summary['seed']}"
@@ -252,7 +318,7 @@ def generate_report(input_root: Path, output_root: Path, targets: dict[str, floa
         aggregate_rows,
         ["task", "method", "final_test_mean", "final_test_std", "target_success_rate", "aulc_mean"],
         table_root / "table-main.tex",
-        "Core LOCCO results.",
+        "Core LAMP results.",
     )
     write_tex_table(
         aggregate_rows,
@@ -267,6 +333,7 @@ def generate_report(input_root: Path, output_root: Path, targets: dict[str, floa
     plot_schematic(figure_root)
     plot_quadratic(summaries, figure_root)
     plot_learning_curves(summaries, figure_root)
+    plot_method_comparison(summaries, figure_root)
     plot_controller(summaries, figure_root)
 
     (output_root / "README.md").write_text(

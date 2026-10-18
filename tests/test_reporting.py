@@ -66,7 +66,7 @@ def test_report_writes_publication_formats(tmp_path: Path) -> None:
     input_root = tmp_path / "input"
     output_root = tmp_path / "output"
     for task in ("quadratic", "clf_moons", "reg_sine"):
-        for method in ("fixed_sgd", "locco_joint"):
+        for method in ("fixed_sgd", "lamp_joint"):
             make_run(input_root, task, method, 1337)
 
     generate_report(
@@ -80,3 +80,6 @@ def test_report_writes_publication_formats(tmp_path: Path) -> None:
     assert (output_root / "figures" / "fig-learning-curves.pdf").exists()
     assert (output_root / "figures" / "fig-learning-curves.svg").exists()
     assert (output_root / "figures" / "fig-learning-curves.png").exists()
+    assert (output_root / "figures" / "fig-method-comparison.pdf").exists()
+    assert (output_root / "figures" / "fig-method-comparison.svg").exists()
+    assert (output_root / "figures" / "fig-method-comparison.png").exists()

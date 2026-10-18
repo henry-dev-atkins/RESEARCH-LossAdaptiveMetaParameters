@@ -2,12 +2,12 @@ import math
 
 import pytest
 
-from experiment import ControllerObservation, LOCCOConfig, LOCCOController
+from experiment import ControllerObservation, LAMPConfig, LAMPController
 
 
-def make_controller() -> LOCCOController:
-    return LOCCOController(
-        LOCCOConfig(
+def make_controller() -> LAMPController:
+    return LAMPController(
+        LAMPConfig(
             gamma_tgt=0.2,
             rho=0.9,
             mu_B=0.9,
@@ -71,8 +71,8 @@ def test_deadband_suppresses_control_update() -> None:
 
 
 def test_controller_clips_to_configured_bounds() -> None:
-    controller = LOCCOController(
-        LOCCOConfig(
+    controller = LAMPController(
+        LAMPConfig(
             gamma_tgt=0.2,
             batch_gain=100.0,
             learning_rate_gain=100.0,

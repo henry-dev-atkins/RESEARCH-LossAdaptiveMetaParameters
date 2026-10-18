@@ -1,4 +1,4 @@
-# PRD: Loss-Driven Online Control of Learning Rate and Batch Size (LOCCO) — Experiment Suite
+# PRD: Loss Adaptive Meta-Parameters (LAMP) — Experiment Suite
 **File:** PRD.md  
 **Version:** 1.0  
 **Owner:** (You)  
@@ -9,7 +9,7 @@
 
 ## 0) Executive Summary
 
-We will build a **reproducible PyTorch experiment suite** that evaluates a loss-driven controller (LOCCO) which adapts **batch size** (and optionally **learning rate**) online based on **observed loss reduction**. The suite must produce **publish-standard results** across proof-of-concept (POC), benchmark, ablation, and robustness experiments.
+We will build a **reproducible PyTorch experiment suite** that evaluates a loss-driven controller (LAMP) which adapts **batch size** (and optionally **learning rate**) online based on **observed loss reduction**. The suite must produce **publish-standard results** across proof-of-concept (POC), benchmark, ablation, and robustness experiments.
 
 Outputs include **CSV logs**, **PNG plots**, and a **summary CSV** ready to drop into a paper. The code must be deterministic where feasible and have a clear CLI.
 
@@ -21,8 +21,8 @@ Outputs include **CSV logs**, **PNG plots**, and a **summary CSV** ready to drop
 Choosing the **learning rate (LR)** and **batch size (BS)** is brittle, workload-specific, and costly to tune. We propose a **feedback controller** that uses the **loss-gap** (difference between predicted deterministic loss decrease and observed decrease) to **co-adapt** LR and BS during training.
 
 ### 1.2 Goals
-- Implement **LOCCO** controller in PyTorch training loops.
-- Compare LOCCO against baselines (SGD, cosine-SGD, Adam/AdamW) on **classification** and **regression** tasks, with both **deep** and **conventional** models.
+- Implement **LAMP** controller in PyTorch training loops.
+- Compare LAMP against baselines (SGD, cosine-SGD, Adam/AdamW) on **classification** and **regression** tasks, with both **deep** and **conventional** models.
 - Produce **POC, benchmark, ablation, and robustness** results.
 - Emit **plots and tables** suitable for a paper (time-to-target, examples-to-target, AULC, final metrics).
 - Ensure **reproducibility** (seeds, deterministic flags) and **clear configuration**.
@@ -37,7 +37,7 @@ Choosing the **learning rate (LR)** and **batch size (BS)** is brittle, workload
 - **Loss-gap:** \(\text{gap}_t = \Delta L_{\mathrm{det},t} - \Delta L_{\mathrm{obs},t}\).  
 - **Deterministic drop (proxy):** \(\Delta L_{\mathrm{det},t} \approx \eta_t \|\widehat g_t\|^2 - \frac{\eta_t^2}{2}\,q_t\), with \(q_t \approx \widehat g_t^\top H_t \widehat g_t\) (or a capped proxy \(L_s\|\widehat g_t\|^2\)).
 - **Observed drop:** \(\Delta L_{\mathrm{obs},t}= L(\theta_t)-L(\theta_{t+1})\). Prefer a **probe batch** to evaluate.
-- **Variance budget (intuition):** stochastic penalty scales like \(\eta_t^2/B_t\). LOCCO targets a **dimensionless** fraction \(\tilde\gamma\) of deterministic decrease.
+- **Variance budget (intuition):** stochastic penalty scales like \(\eta_t^2/B_t\). LAMP targets a **dimensionless** fraction \(\tilde\gamma\) of deterministic decrease.
 - **Signed control error:** \(e_t = \frac{\text{gap}_t}{\eta_t\|\widehat g_t\|^2+\varepsilon} - \tilde\gamma\).
 
 ---
@@ -52,7 +52,7 @@ Choosing the **learning rate (LR)** and **batch size (BS)** is brittle, workload
   - Conventional: Linear regression/classifier.
   - Deep: MLP (configurable width/depth).
 - **Optimizers:** SGD (±momentum), cosine-SGD, Adam/AdamW.
-- **Controller Config (LOCCO):**
+- **Controller Config (LAMP):**
   - `use` (bool), `alpha` (batch gain), `beta` (LR gain), `rho` (EMA loss smoothing), `Ls` (smoothness cap), `use_curv_proxy` (bool), `preserve_eta_over_B` (bool), `B_min`, `B_max`, `gamma_tgt`, `deadband`, `hysteresis_k`, etc.
 - **Run Config:**
   - `task` (“clf” or “reg”), `epochs`, `batch`, `lr`, `weight_decay`, seeds.
@@ -76,7 +76,7 @@ Choosing the **learning rate (LR)** and **batch size (BS)** is brittle, workload
 experiment.py
 ├── data.py (synthetic generators, splits, loaders)
 ├── models.py (LinearModel, MLP)
-├── locco.py (controller class + update logic)
+├── lamp.py (controller class + update logic)
 ├── train.py (train_one_epoch, evaluate, metrics)
 ├── runners.py (suite orchestration: POC/Bench/Abla/Robust)
 ├── viz.py (plotting)
@@ -116,7 +116,7 @@ The **runner** composes dataset → model → optimizer → controller → train
 - **SGD+Cosine**: cosine annealing scheduler over `epochs`.
 - **Adam/AdamW**: default betas; WD per model/task.
 
-### 5.4 LOCCO Controller
+### 5.4 LAMP Controller
 
 #### 5.4.1 Signals
 - `grad_norm2 = Σ ||∂L/∂θ||²` from current step.
@@ -132,7 +132,7 @@ The **runner** composes dataset → model → optimizer → controller → train
 - If `|err| < deadband`: set `err = 0`.
 - Maintain a low-pass state `vB = μB * vB + (1-μB) * kB * err` (μB≈0.9).
 - `logB_new = log(B_t) + vB`; `B_{t+1} = clip(round(exp(logB_new)), B_min, B_max)`.
-- (Optional) LR guard: preserve `eta/B` on **decrease** of `B` only; otherwise LR follows schedule or separate LOCCO `beta` rule.
+- (Optional) LR guard: preserve `eta/B` on **decrease** of `B` only; otherwise LR follows schedule or separate LAMP `beta` rule.
 
 **Rationale:**  
 - Signed error allows \(B\) to **increase or decrease**.  
@@ -140,7 +140,7 @@ The **runner** composes dataset → model → optimizer → controller → train
 - HVP reduces curvature overestimation; if disabled, `Ls` cap prevents over-shrinking `delta_det`.
 
 ### 5.5 Training Loop
-- Manual micro-iteration to support per-step `B` change when LOCCO is active.
+- Manual micro-iteration to support per-step `B` change when LAMP is active.
 - After each optimizer step: compute controller signals and update `(eta, B)` for **next** step.
 - LR per-step override via `param_group["lr"]` if needed.
 
@@ -183,23 +183,23 @@ Add flags if needed: `--probe-eval`, `--hvp`, `--deadband 0.02`, etc.
 
 ### 6.1 POC
 - **Moons (clf)** + **Sine (reg)** with Linear and MLP.
-- Methods: SGD, Adam, SGD+cosine, LOCCO.
+- Methods: SGD, Adam, SGD+cosine, LAMP.
 - Plots: loss vs epoch/examples/time; `B_t` & `eta_t` vs epoch; `gap_norm` vs epoch.
 - Table: final metric, time/examples-to-target, AULC, avg/max B.
 
 ### 6.2 Benchmarks
 - **Blobs (clf, d=12, k=7, MLP 4×256)** and **Linear (reg, d=25, MLP 4×256)**.
-- Methods: SGD+cosine, Adam, LOCCO.
+- Methods: SGD+cosine, Adam, LAMP.
 - Same plots/tables as POC; include throughput and (optional) peak mem.
 
 ### 6.3 Ablations
-- LOCCO-noSmooth (ρ=0), LOCCO-noCurv (no HVP/low Ls), FixedB (no control), Rectified error (to show monotone \(B\)).
+- LAMP-noSmooth (ρ=0), LAMP-noCurv (no HVP/low Ls), FixedB (no control), Rectified error (to show monotone \(B\)).
 - Table: final metric, time-to-target, AULC, var(B), var(eta), chatter events.
 
 ### 6.4 Robustness/Extrema
 - LR ∈ {1e-4, 1.0}, B ∈ {8, 2048}, label noise 30%, sampling w/o replacement (if added).
 - Heatmaps over (init LR, init B) of time-to-target; success/failure map.
-- Claim: LOCCO enlarges feasible hyperparameter region and degrades gracefully.
+- Claim: LAMP enlarges feasible hyperparameter region and degrades gracefully.
 
 ---
 
@@ -219,9 +219,9 @@ Add flags if needed: `--probe-eval`, `--hvp`, `--deadband 0.02`, etc.
 
 1. **Reproducibility:** reruns with same seeds reproduce summary metrics within ±1% relative.
 2. **Artifacts:** For each run, CSV and PNG exist; `SUMMARY.csv` aggregates best-val and final test metrics.
-3. **POC evidence:** LOCCO improves time-to-target vs at least one baseline on both clf and reg.
+3. **POC evidence:** LAMP improves time-to-target vs at least one baseline on both clf and reg.
 4. **Ablations:** show monotone \(B\) when error is rectified and **non-monotone** \(B\) with signed/log-space control.
-5. **Robustness:** LOCCO succeeds (reaches target) on at least **two** extreme settings where a baseline fails.
+5. **Robustness:** LAMP succeeds (reaches target) on at least **two** extreme settings where a baseline fails.
 6. **Documentation:** README with how-to-run and how-to-interpret.
 
 ---
@@ -239,11 +239,11 @@ Add flags if needed: `--probe-eval`, `--hvp`, `--deadband 0.02`, etc.
 
 ## 10) Implementation Plan (Engineering Tasks)
 
-1. Scaffold modules (`data.py, models.py, locco.py, train.py, runners.py, viz.py`).
+1. Scaffold modules (`data.py, models.py, lamp.py, train.py, runners.py, viz.py`).
 2. Implement datasets + loaders, splits with seeds.
 3. Implement models (Linear, MLP).
 4. Implement optimizers + schedulers.
-5. Implement LOCCO (signed error, log-space, deadband, hysteresis, optional HVP).
+5. Implement LAMP (signed error, log-space, deadband, hysteresis, optional HVP).
 6. Training loop with per-step override of `(eta, B)`.
 7. Evaluation, logging (CSV), plotting.
 8. Runners for POC, Benchmarks, Ablations, Robustness.
@@ -255,7 +255,7 @@ Add flags if needed: `--probe-eval`, `--hvp`, `--deadband 0.02`, etc.
 
 ## 11) Appendix: Pseudocode
 
-### 11.1 LOCCO (Batch-First Variant)
+### 11.1 LAMP (Batch-First Variant)
 Inputs: eta_t, B_t, grad_norm2, L_t, L_tp1, Ls, rho, gamma_tgt, deadband, muB, kB
 State: ema_loss, vB
 
@@ -287,7 +287,7 @@ batch = data[idx : idx + B_step]
 loss, grad_norm2 = forward_backward_step(batch, eta_t)
 optimizer.step()
 # Controller
-eta_{t+1}, B_{t+1} = LOCCO.update(loss_t, loss_tp1, grad_norm2, eta_t, B_t)
+eta_{t+1}, B_{t+1} = LAMP.update(loss_t, loss_tp1, grad_norm2, eta_t, B_t)
 # Logging
 record epoch metrics and controller diagnostics
 

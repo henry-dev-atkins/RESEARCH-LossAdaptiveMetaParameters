@@ -23,9 +23,9 @@
   "methods": [
     "fixed_sgd",
     "adam",
-    "locco_batch",
-    "locco_lr",
-    "locco_joint"
+    "lamp_batch",
+    "lamp_lr",
+    "lamp_joint"
   ],
   "targets": {
     "clf_moons": 0.85,
